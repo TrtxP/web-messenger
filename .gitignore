@@ -1,0 +1,22 @@
+frontend/.dart_tool/
+frontend/.packages
+frontend/build/
+backend/node_modules/
+backend/dist/
+backend/data/store.json
+
+SPEC.md
+Mobile messenger.txt
+PIPELINE.md
+implementation_plan.md
+PROGRESS.md
+PROMPT.md
+.env
+backend/uploads/
+backend/test/**/*.js
+backend/test/**/*.js.map
+backend/test/**/*.d.ts
+backend/jest.config.d.ts
+backend/jest.config.js.map
+*.tsbuildinfo
+docs/
