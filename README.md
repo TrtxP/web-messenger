@@ -44,7 +44,7 @@ A modern, responsive, secure web messaging application built with **Flutter Web*
 9. [Automated & Penetration Testing](#-automated--penetration-testing)
    - [Backend Automated Test Suites (16 Suites)](#backend-automated-test-suites-16-suites)
    - [Backend Penetration Security Suite (42 Tests)](#backend-penetration-security-suite-42--42-pass)
-   - [Frontend Widget & Unit Test Suites (17 Suites)](#frontend-widget--unit-test-suites-17-suites)
+   - [Frontend Widget & Unit Test Suites (19 Suites - 87 Tests)](#frontend-widget--unit-test-suites-19-suites---87-tests)
 10. [Reviewer Quickstart & Walkthrough Guide](#-reviewer-quickstart--walkthrough-guide)
     - [Quickstart in 3 Steps](#quickstart-in-3-steps)
     - [Full Evaluation Walkthrough](#full-evaluation-walkthrough)
@@ -211,15 +211,6 @@ web-messenger/
 ├── .gitignore                 # Protected git ignore rules
 ├── docker-compose.yml         # Containerized PostgreSQL + NestJS Backend
 ├── README.md                  # Comprehensive project documentation
-├── Web Messenger.txt          # Technical assignment & functional specifications
-│
-├── docs/                      # Architectural & specification documents
-│   ├── API.md                 # REST API & WebSocket event specifications
-│   ├── ARCHITECTURE.md        # System architecture & cryptographic layout
-│   ├── DATA_MODEL.md          # PostgreSQL database schema & relationships
-│   ├── PIPELINE.md            # Step-by-step implementation roadmap
-│   ├── REQUIREMENTS.md        # Requirements traceability matrix
-│   └── SPEC.md                # Web Messenger technical specification
 │
 ├── backend/                   # NestJS Backend API & WebSocket Server
 │   ├── Dockerfile             # Production container build
@@ -231,6 +222,7 @@ web-messenger/
 │   │   ├── app.module.ts      # Root NestJS module
 │   │   ├── auth/              # Registration, Login, OTP, Recovery, JWT Guard
 │   │   ├── chats/             # Chats, Messages, In-Chat Search, Archive, Mute
+│   │   ├── groups/            # Group chats & member management controller
 │   │   ├── common/            # Global exception filters & interceptors
 │   │   ├── crypto/            # AES-256-GCM buffer & field encryption service
 │   │   ├── faker/             # Mock data generator & database seeder (seed.ts)
@@ -238,13 +230,17 @@ web-messenger/
 │   │   ├── invitations/       # Contact invitation system (send, accept, decline)
 │   │   ├── media/             # Encrypted file upload & streaming decryptor
 │   │   ├── notifications/     # Notification service (FCM push / mock mode)
-│   │   ├── store/             # PostgreSQL persistence layer (pg Pool)
+│   │   ├── store/             # PostgreSQL persistence layer (Facade Design Pattern)
 │   │   │   ├── database.ts    # Schema initialization & table creation
 │   │   │   ├── store.service.ts # Central store facade
-│   │   │   ├── auth.store.ts
-│   │   │   ├── chats.store.ts # Chat & message queries (search, archive, mute)
-│   │   │   ├── users.store.ts
-│   │   │   └── invitations.store.ts
+│   │   │   ├── auth.store.ts  # Auth facade (tokens, verification, password)
+│   │   │   ├── auth/          # Submodules: auth-tokens, auth-verification, auth-password
+│   │   │   ├── chats.store.ts # Chats facade (conversations, messages, groups, polls)
+│   │   │   ├── chats/         # Submodules: chat-conversations, chat-messages, chat-groups, chat-polls
+│   │   │   ├── invitations.store.ts # Invitations facade (queries, actions)
+│   │   │   ├── invitations/   # Submodules: invitation-queries, invitation-actions
+│   │   │   ├── users.store.ts # Users facade (profile, search, blocking)
+│   │   │   └── users/         # Submodules: user-profile, user-search, user-blocking
 │   │   └── users/             # Profile, avatar, search, blocking & blacklist
 │   └── test/                  # 16 Automated Test Suites + Penetration Security Suite
 │       ├── penetration.spec.ts # Comprehensive P1–P8 security suite (42 tests)
@@ -261,19 +257,51 @@ web-messenger/
 │   │   │   ├── constants/     # API endpoints & dart-define base URL
 │   │   │   ├── network/       # HTTP API Client with tunnel/proxy support
 │   │   │   ├── services/      # Notification service & connectivity monitors
+│   │   │   ├── widgets/       # ConnectivityBanner (offline status indicator)
 │   │   │   └── auth_validator.dart # Password checklist & email validation
 │   │   └── features/
 │   │       ├── auth/          # Login, Register, OTP verify, Password recovery
-│   │       ├── chats/         # HomeScreen, ChatScreen, Search, Media, Voice
-│   │       ├── invitations/   # Pending invites (received & sent tabs)
+│   │       ├── chats/         # Multi-panel chat, search, voice memos & polls
+│   │       │   ├── controllers/ # ChatSocketController, ChatPresenceController, HomeSocketController
+│   │       │   ├── screens/   # HomeScreen, ChatScreen, ResponsiveShell (Dual Panel)
+│   │       │   ├── services/  # ChatService, ChatAudioRecorder
+│   │       │   └── widgets/   # HomeAppBar, ChatListItem, ChatAppBar, ChatInputBar, PollBubble...
+│   │       ├── groups/        # Group management & invitation UI
+│   │       │   ├── screens/   # CreateGroupScreen, GroupInfoScreen
+│   │       │   └── services/  # GroupService (invite, leave, members)
+│   │       ├── invitations/   # Pending invites (Received, Sent, Groups tabs)
 │   │       ├── profile/       # Profile edit, avatar picker, Blocked Users Screen
 │   │       └── search/        # Debounced user discovery delegate
 │   ├── web/                   # Web-specific assets, index.html & manifest
 │   ├── windows/               # Windows native desktop runner
 │   ├── android/               # Android native runner
-│   └── test/                  # 17 Widget and Unit Test Suites
+│   └── test/                  # 19 Widget and Unit Test Suites (87/87 tests passed)
 └── uploads/                   # AES-256-GCM encrypted media files at rest
 ```
+
+### Backend Architecture (NestJS & Facade Pattern)
+
+To ensure high maintainability, testability, and separation of concerns, the backend persistence layer (`backend/src/store/`) implements the **Facade Design Pattern**:
+- **`AuthStore`**: Coordinates token generation, email OTP verification, and password resets by delegating to `AuthTokensStore`, `AuthVerificationStore`, and `AuthPasswordStore`.
+- **`ChatsStore`**: Coordinates conversation life-cycles, message history/search, group chat memberships/invites, and polls by delegating to `ChatConversationsStore`, `ChatMessagesStore`, `ChatGroupsStore`, and `ChatPollsStore`.
+- **`InvitationsStore`**: Coordinates relationship queries and accept/decline actions via `InvitationQueriesStore` and `InvitationActionsStore`.
+- **`UsersStore`**: Coordinates user profiles, directory searches, and user blocking/blacklist moderation via `UserProfileStore`, `UserSearchStore`, and `UserBlockingStore`.
+
+All controllers interact exclusively with the unified facades, allowing database queries to scale independently without polluting business controllers.
+
+### Frontend Architecture (Flutter & Modular Decoupling)
+
+The Flutter web frontend utilizes clean, decoupled architecture separating presentation widgets, reactive controllers, and HTTP/WebSocket network services:
+- **Modular Controllers**:
+  - `ChatSocketController`: Encapsulates Socket.IO event listeners for real-time messages, delivery status updates, typing indicators, and message edits/deletions.
+  - `ChatPresenceController`: Handles user online/offline presence pinging and active conversation state.
+  - `HomeSocketController`: Manages user room subscriptions, reconnection backoff, and reactive updates for chat deletions, group member changes, and contact invitations.
+- **Dedicated Components**:
+  - `HomeAppBar`: Encapsulates archive toggling, invitation notifications, profile access, and logout.
+  - `ChatListItem`: Encapsulates swipe-to-delete gestures (`Dismissible`), 1500ms long-press interactions, avatar online badges, and message status ticks.
+  - `ChatAppBar`: Encapsulates partner/group information, real-time typing indicators, and header actions.
+  - `ChatInputBar`: Handles text inputs, desktop keyboard shortcuts (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd>), attachments, and audio recorder triggers.
+  - `ConnectivityBanner`: Real-time network banner indicating connection loss and automated recovery.
 
 ---
 
@@ -599,12 +627,12 @@ Verifies immunity against:
 - **[P7] Cryptographic Standards**: Bcrypt `$2b$` format, AES-256-GCM format validation.
 - **[P8] Session Management**: Access token 15m expiration, token revocation on logout.
 
-### Frontend Widget & Unit Test Suites (17 Suites)
+### Frontend Widget & Unit Test Suites (19 Suites - 87 Tests)
 ```bash
 cd frontend
 flutter test
 ```
-Executes 17 widget and unit test suites:
+Executes 19 widget and unit test suites (87 of 87 tests passing):
 - `chat_presence_display_test.dart`: Online/offline presence dot and status indicator.
 - `notifications_service_test.dart`: Notification handling and suppression in active chats.
 - `step12_swipe_delete_test.dart`: Conversation deletion with confirmation modal.
@@ -622,6 +650,8 @@ Executes 17 widget and unit test suites:
 - `step16_rich_media_test.dart`: Media attachment actions.
 - `step17_audio_and_extras_test.dart`: Audio recorder, playback speed toggles & offline banners.
 - `step18_media_upload_platform_test.dart`: Platform-specific media selection and upload handlers.
+- `create_group_test.dart`: Group creation contact requirement and input validation.
+- `chat_input_bar_test.dart`: Keyboard shortcuts (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd>), text input, and message submission.
 
 ---
 
@@ -726,4 +756,4 @@ Follow these steps to experience and verify the complete Web Messenger lifecycle
 | **Group Chat Polls** | ✅ Done | Interactive voting, anonymous/public modes, real-time result bars |
 | **Multi-Panel Chat Screens** | ✅ Done | Dual-panel / split view for opening $\ge 2$ chats simultaneously |
 | **AES-256-GCM Field Encryption** | ✅ Done | Encrypted at rest for messages, bios, and disk media |
-| **Automated Testing** | ✅ Done | 16 Backend suites + 42 Penetration tests + 17 Frontend suites |
+| **Automated Testing** | ✅ Done | 16 Backend suites + 42 Penetration tests + 19 Frontend suites (87/87 tests passed) |
