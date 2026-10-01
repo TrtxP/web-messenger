@@ -124,6 +124,10 @@ export class StoreService implements OnModuleInit, OnModuleDestroy {
     return this.usersStore.getBlockedUserIds(blockerId);
   }
 
+  getBlockedUsers(blockerId: string) {
+    return this.usersStore.getBlockedUsers(blockerId);
+  }
+
   isBlocked(blockerId: string, blockedId: string) {
     return this.usersStore.isBlocked(blockerId, blockedId);
   }
@@ -230,6 +234,10 @@ export class StoreService implements OnModuleInit, OnModuleDestroy {
 
   getPendingGroupInvitations(userId: string) {
     return this.chatsStore.getPendingGroupInvitations(userId);
+  }
+
+  getGroupPendingInvitations(groupId: string, userId: string) {
+    return this.chatsStore.getGroupPendingInvitations(groupId, userId);
   }
 
   acceptGroupInvitation(invId: string, userId: string) {

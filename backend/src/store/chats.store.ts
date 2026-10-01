@@ -110,6 +110,10 @@ export class ChatsStore {
     return this.groupsStore.getPendingGroupInvitations(userId);
   }
 
+  async getGroupPendingInvitations(groupId: string, userId: string) {
+    return this.groupsStore.getGroupPendingInvitations(groupId, userId);
+  }
+
   async acceptGroupInvitation(invId: string, userId: string) {
     return this.groupsStore.acceptGroupInvitation(invId, userId);
   }

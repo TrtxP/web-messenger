@@ -531,7 +531,9 @@ class HomeScreenState extends State<HomeScreen> {
               final messenger = ScaffoldMessenger.of(context);
               messenger.clearSnackBars();
               messenger.showSnackBar(
-                const SnackBar(content: Text('Group created')),
+                const SnackBar(
+                    content: Text(
+                        'Group created, invitations sent (pending)')),
               );
             }
           }

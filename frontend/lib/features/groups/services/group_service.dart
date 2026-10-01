@@ -4,7 +4,8 @@ class GroupService {
   GroupService({Api? api}) : _api = api ?? Api();
   final Api _api;
 
-  Future<Map<String, dynamic>> createGroup(String name, List<String> memberIds) async {
+  Future<Map<String, dynamic>> createGroup(
+      String name, List<String> memberIds) async {
     return _api.post('/groups', {'name': name, 'memberIds': memberIds});
   }
 
@@ -13,8 +14,22 @@ class GroupService {
     return Map<String, dynamic>.from(res.first as Map);
   }
 
-  Future<void> inviteToGroup(String groupId, List<String> userIds) async {
-    await _api.post('/groups/$groupId/invite', {'userIds': userIds});
+  Future<List<dynamic>> inviteToGroup(
+      String groupId, List<String> userIds) async {
+    final res =
+        await _api.post('/groups/$groupId/invite', {'userIds': userIds});
+    final dynamic list = res['invitations'] ?? res['data'] ?? [];
+    if (list is List) return list;
+    return [];
+  }
+
+  Future<List<dynamic>> getGroupPendingInvitations(String groupId) async {
+    try {
+      final res = await _api.get('/groups/$groupId/invitations');
+      return res;
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<void> leaveGroup(String groupId) async {

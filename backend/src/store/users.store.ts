@@ -55,8 +55,12 @@ export class UsersStore {
     return this.blocking.unblockUser(blockerId, blockedId);
   }
 
-  async getBlockedUserIds(blockedId: string): Promise<PublicUser[]> {
-    return this.blocking.getBlockedUserIds(blockedId);
+  async getBlockedUserIds(blockerId: string): Promise<string[]> {
+    return this.blocking.getBlockedUserIds(blockerId);
+  }
+
+  async getBlockedUsers(blockerId: string): Promise<PublicUser[]> {
+    return this.blocking.getBlockedUsers(blockerId);
   }
 
   async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {

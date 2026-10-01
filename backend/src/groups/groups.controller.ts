@@ -39,6 +39,12 @@ export class GroupsController {
     return this.store.declineGroupInvitation(invId, req.user.id);
   }
 
+  @Get(':id/invitations')
+  @UseGuards(AuthGuard)
+  getGroupPendingInvitations(@Req() req: any, @Param('id') id: string) {
+    return this.store.getGroupPendingInvitations(id, req.user.id);
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard)
   async getGroupInfo(@Req() req: any, @Param('id') id: string) {
@@ -67,7 +73,7 @@ export class GroupsController {
     for (const inv of created) {
       this.gateway.notifyGroupInvitation(inv.toId, { chatId: id, groupName: (info as any).name || 'Group', invitationId: inv.id });
     }
-    return created;
+    return { invitations: created };
   }
 
   @Delete(':id/members/:userId')

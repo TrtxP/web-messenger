@@ -118,6 +118,16 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     ),
                   ),
                 ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'They will receive an invite in Groups tab (pending).',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: _contacts.isEmpty
                       ? const Center(

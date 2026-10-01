@@ -16,15 +16,9 @@ export class ChatGroupsStore {
     for (const toId of uniqueMembers) {
       const userCheck = await this.pool.query(`SELECT 1 FROM users WHERE id = $1`, [toId]);
       if (!userCheck.rowCount) continue;
-      const alreadyMember = await this.pool.query(`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2`, [chatId, toId]);
-      if (alreadyMember.rowCount) continue;
-      await this.pool.query(
-        `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING`,
-        [chatId, toId],
-      );
       const invId = randomUUID();
       await this.pool.query(
-        `INSERT INTO group_invitations (id, chat_id, from_id, to_id, status) VALUES ($1, $2, $3, $4, 'accepted')`,
+        `INSERT INTO group_invitations (id, chat_id, from_id, to_id, status) VALUES ($1, $2, $3, $4, 'pending')`,
         [invId, chatId, creatorId, toId],
       );
       invitations.push({ id: invId, toId });
@@ -81,6 +75,8 @@ export class ChatGroupsStore {
     const created: any[] = [];
     for (const toId of [...new Set(userIds || [])]) {
       if (!toId || toId === fromId) continue;
+      const userCheck = await this.pool.query(`SELECT 1 FROM users WHERE id = $1`, [toId]);
+      if (!userCheck.rowCount) continue;
       const already = await this.pool.query(`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2`, [groupId, toId]);
       if (already.rowCount) continue;
       const pending = await this.pool.query(
@@ -104,6 +100,18 @@ export class ChatGroupsStore {
        FROM group_invitations gi JOIN chats c ON c.id = gi.chat_id JOIN users u ON u.id = gi.from_id
        WHERE gi.to_id = $1 AND gi.status = 'pending' ORDER BY gi.created_at DESC`,
       [userId],
+    );
+    return res.rows;
+  }
+
+  async getGroupPendingInvitations(groupId: string, userId: string) {
+    const member = await this.pool.query(`SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2`, [groupId, userId]);
+    if (!member.rowCount) throw new HttpException('Chat not found', HttpStatus.NOT_FOUND);
+    const res = await this.pool.query(
+      `SELECT gi.id, gi.to_id AS "userId", u.username, gi.status, gi.created_at AS "createdAt"
+       FROM group_invitations gi JOIN users u ON u.id = gi.to_id
+       WHERE gi.chat_id = $1 AND gi.status = 'pending' ORDER BY gi.created_at DESC`,
+      [groupId],
     );
     return res.rows;
   }

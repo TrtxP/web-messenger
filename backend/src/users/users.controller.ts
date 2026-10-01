@@ -162,7 +162,7 @@ export class UsersController {
   @Get('blocked-list')
   @UseGuards(AuthGuard)
   getBlockedUsersList(@Req() req: any) {
-    return this.store.getBlockedUserIds(req.user.id);
+    return this.store.getBlockedUsers(req.user.id);
   }
 
   @Post(':id/block')
