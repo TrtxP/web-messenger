@@ -36,7 +36,18 @@ export class UserBlockingStore {
     return { ok: true, unblockedId: blockedId };
   }
 
-  async getBlockedUserIds(blockedId: string): Promise<PublicUser[]> {
+  async getBlockedUserIds(blockerId: string): Promise<string[]> {
+    const res = await this.pool.query(
+      `SELECT b.blocked_id AS id
+       FROM blocked_users b
+       WHERE b.blocker_id = $1
+       ORDER BY b.blocked_id ASC`,
+      [blockerId],
+    );
+    return res.rows.map((r) => r.id as string);
+  }
+
+  async getBlockedUsers(blockerId: string): Promise<PublicUser[]> {
     const res = await this.pool.query(
       `SELECT u.id, u.email, u.username,
               u.about_encrypted, u.avatar_path
@@ -44,7 +55,7 @@ export class UserBlockingStore {
        JOIN users u ON b.blocked_id = u.id
        WHERE b.blocker_id = $1
        ORDER BY u.username ASC`,
-      [blockedId],
+      [blockerId],
     );
     return res.rows.map((r) => this.userProfileStore.publicUser(r));
   }
