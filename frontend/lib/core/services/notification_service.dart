@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -135,11 +134,11 @@ class NotificationService {
 
   bool get isPlatformSupported {
     if (kIsWeb) return false;
-    return Platform.isAndroid ||
-        Platform.isIOS ||
-        Platform.isWindows ||
-        Platform.isLinux ||
-        Platform.isMacOS;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS;
   }
 
   String formatNotificationContent({
@@ -223,7 +222,7 @@ class NotificationService {
         onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
       );
 
-      if (!kIsWeb && Platform.isAndroid) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         final androidPlugin =
             _notificationsPlugin.resolvePlatformSpecificImplementation<
                 AndroidFlutterLocalNotificationsPlugin>();
@@ -269,6 +268,7 @@ class NotificationService {
   }
 
   Future<void> initFirebaseMessaging(Api api) async {
+    if (kIsWeb) return;
     if (_isFirebaseInitialized) return;
     try {
       await Firebase.initializeApp();
@@ -374,7 +374,8 @@ class NotificationService {
   Future<bool> requestPermission(BuildContext context,
       {bool force = false}) async {
     if (kIsWeb) return false;
-    if (Platform.isWindows || Platform.isLinux) {
+    if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux) {
       return true;
     }
 
@@ -384,7 +385,7 @@ class NotificationService {
           prefs.getBool('notification_permission_prompted') ?? false;
 
       if (!force) {
-        if (Platform.isAndroid) {
+        if (defaultTargetPlatform == TargetPlatform.android) {
           final androidImplementation =
               _notificationsPlugin.resolvePlatformSpecificImplementation<
                   AndroidFlutterLocalNotificationsPlugin>();
@@ -396,7 +397,8 @@ class NotificationService {
           if (alreadyPrompted) {
             return false;
           }
-        } else if (Platform.isIOS || Platform.isMacOS) {
+        } else if (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS) {
           if (alreadyPrompted) {
             return false;
           }
@@ -408,14 +410,15 @@ class NotificationService {
       await prefs.setBool('notification_permission_prompted', true);
       if (grantedByDialog != true) return false;
 
-      if (Platform.isAndroid) {
+      if (defaultTargetPlatform == TargetPlatform.android) {
         final androidImplementation =
             _notificationsPlugin.resolvePlatformSpecificImplementation<
                 AndroidFlutterLocalNotificationsPlugin>();
         final granted =
             await androidImplementation?.requestNotificationsPermission();
         return granted ?? true;
-      } else if (Platform.isIOS || Platform.isMacOS) {
+      } else if (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS) {
         final iosImplementation =
             _notificationsPlugin.resolvePlatformSpecificImplementation<
                 IOSFlutterLocalNotificationsPlugin>();

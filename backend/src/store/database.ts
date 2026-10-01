@@ -53,6 +53,9 @@ export async function initDatabaseSchema(pool: Pool): Promise<void> {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
+    ALTER TABLE chats ADD COLUMN IF NOT EXISTS type VARCHAR(16) DEFAULT 'direct';
+    ALTER TABLE chats ADD COLUMN IF NOT EXISTS avatar_path VARCHAR(255);
+
     CREATE TABLE IF NOT EXISTS chat_members (
       chat_id VARCHAR(64) NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
       user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -65,6 +68,42 @@ export async function initDatabaseSchema(pool: Pool): Promise<void> {
     ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE;
     ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS is_muted BOOLEAN DEFAULT FALSE;
     ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS role VARCHAR(16) DEFAULT 'member';
+
+    CREATE TABLE IF NOT EXISTS group_invitations (
+      id VARCHAR(64) PRIMARY KEY,
+      chat_id VARCHAR(64) NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      from_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS polls (
+      id VARCHAR(64) PRIMARY KEY,
+      chat_id VARCHAR(64) NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      creator_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      question_encrypted TEXT NOT NULL,
+      is_anonymous BOOLEAN DEFAULT FALSE,
+      is_closed BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id VARCHAR(64) PRIMARY KEY,
+      poll_id VARCHAR(64) NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+      text_encrypted TEXT NOT NULL,
+      sort_order INT DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      id VARCHAR(64) PRIMARY KEY,
+      poll_id VARCHAR(64) NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+      option_id VARCHAR(64) NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+      user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(poll_id, user_id)
+    );
 
     CREATE TABLE IF NOT EXISTS messages (
       id VARCHAR(64) PRIMARY KEY,

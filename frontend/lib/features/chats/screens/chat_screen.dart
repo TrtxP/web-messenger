@@ -1,30 +1,40 @@
-// ignore_for_file: library_prefixes
+// ignore_for_file: unnecessary_cast
 
 import 'dart:async';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart';
-
+import '../../../core/utils/platform_utils.dart';
+import '../../../core/widgets/connectivity_banner.dart';
+import '../../../core/services/notification_service.dart';
+import '../../../core/network/api_client.dart';
 import '../services/chat_service.dart';
 import '../services/chat_media_handler.dart';
-import '../../profile/services/profile_service.dart';
-import '../../profile/widgets/user_profile_modal.dart';
-import '../widgets/chat_app_bar_title.dart';
+import '../services/chat_audio_recorder.dart';
+import '../services/poll_service.dart';
+import '../controllers/chat_socket_controller.dart';
+import '../controllers/chat_presence_controller.dart';
+import '../widgets/chat_app_bar.dart';
 import '../widgets/chat_input_bar.dart';
 import '../widgets/chat_message_list.dart';
+import '../widgets/chat_search_bar.dart';
+import '../widgets/create_poll_dialog.dart';
 import '../widgets/full_screen_image_viewer.dart';
 import '../widgets/message_action_dialogs.dart';
-import '../../../core/services/notification_service.dart';
-import '../../../core/constants/api_constants.dart';
-import '../../../core/network/api_client.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import '../../profile/services/profile_service.dart';
+import '../../profile/widgets/user_profile_modal.dart';
+import '../../groups/screens/group_info_screen.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.chat, required this.user});
+  const ChatScreen({
+    super.key,
+    required this.chat,
+    required this.user,
+    this.onClose,
+  });
+
   final Map<String, dynamic> chat;
   final Map<String, dynamic> user;
+  final VoidCallback? onClose;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -33,30 +43,36 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chatService = ChatService();
   final ProfileService _profileService = ProfileService();
+  final PollService _pollService = PollService();
   late final ChatMediaHandler _mediaHandler =
       ChatMediaHandler(chatService: _chatService);
+  final ChatAudioRecorder _audioRecorder = ChatAudioRecorder();
 
   final TextEditingController textController = TextEditingController();
   final ScrollController scrollController = ScrollController();
-  final AudioRecorder audioRecorder = AudioRecorder();
-  String? recordingPath;
+
+  late final ChatSocketController _socketController;
+  late final ChatPresenceController _presenceController;
 
   List<dynamic> messages = [];
   bool isLoading = true;
+  bool isRefreshingMessages = false;
+  bool isMuted = false;
+
   bool isContactOnline = false;
   String? contactActivity;
   DateTime? contactLastSeenAt;
-  String? _myActivity;
-  bool isRecording = false;
-  int recordingSeconds = 0;
-  Timer? recordingTimer;
-  Timer? typingDebounceTimer;
-  Timer? messageRefreshTimer;
-  Timer? presenceRefreshTimer;
-  Timer? activityHeartbeatTimer;
-  bool isMuted = false;
-  bool isRefreshingMessages = false;
-  IO.Socket? _socket;
+
+  bool _isSearchOpen = false;
+  String? _highlightMessageId;
+  String? _searchQuery;
+  bool _isOffline = false;
+
+  Map<String, String> _senderNames = {};
+  int _groupMemberCount = 0;
+  bool _isGroupInfoOpen = false;
+  bool _isDisposed = false;
+  Timer? _messageRefreshTimer;
 
   @override
   void initState() {
@@ -69,36 +85,76 @@ class _ChatScreenState extends State<ChatScreen> {
     isMuted = widget.chat['isMuted'] == true;
     final partner = widget.chat['partner'];
     isContactOnline = partner is Map && partner['isOnline'] == true;
+
     _fetchMessages();
-    _refreshContactPresence();
-    _initSocket();
-    presenceRefreshTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _refreshContactPresence(),
+    if (isGroupChat) {
+      _loadGroupMembers();
+    }
+
+    _presenceController = ChatPresenceController(
+      chatId: chatId,
+      isGroupChat: isGroupChat,
+      chatService: _chatService,
+      onPartnerPresenceChanged: (isOnline, activity, lastSeenAt) {
+        if (mounted && !_isDisposed) {
+          if (isContactOnline != isOnline ||
+              contactActivity != activity ||
+              contactLastSeenAt != lastSeenAt) {
+            setState(() {
+              isContactOnline = isOnline;
+              contactActivity = activity;
+              contactLastSeenAt = lastSeenAt;
+            });
+          }
+        }
+      },
     );
-    messageRefreshTimer = Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => _fetchMessages(),
+    _presenceController.init();
+
+    _socketController = ChatSocketController(
+      chatId: chatId,
+      onMessageStatusUpdated: (msgId, newStatus, targetChatId) {
+        if (!mounted || _isDisposed) return;
+        if (targetChatId != null && targetChatId != chatId) return;
+        setState(() {
+          final index =
+              messages.indexWhere((m) => m['id']?.toString() == msgId);
+          if (index != -1) {
+            messages[index]['status'] = newStatus;
+          }
+        });
+      },
+      onChatDeleted: (deletedChatId) {
+        if (!mounted || _isDisposed) return;
+        if (deletedChatId == chatId) {
+          _handleCloseChat();
+        }
+      },
+      onConnectivityChanged: (isOffline) {
+        if (mounted && !_isDisposed) {
+          setState(() => _isOffline = isOffline);
+        }
+      },
     );
+    _socketController.connect();
+
+    _messageRefreshTimer =
+        Timer.periodic(const Duration(seconds: 4), (_) => _fetchMessages());
   }
 
   @override
   void dispose() {
-    _socket?.disconnect();
-    _socket?.dispose();
-    if (NotificationService.activeChatId == widget.chat['id']?.toString()) {
-      NotificationService.activeChatId = null;
-    }
+    _isDisposed = true;
+    _socketController.dispose();
+    _presenceController.dispose();
+    _audioRecorder.dispose();
+    _messageRefreshTimer?.cancel();
+
     textController.dispose();
     scrollController.dispose();
-    recordingTimer?.cancel();
-    audioRecorder.dispose();
-    typingDebounceTimer?.cancel();
-    messageRefreshTimer?.cancel();
-    presenceRefreshTimer?.cancel();
-    activityHeartbeatTimer?.cancel();
-    if (_myActivity != null) {
-      unawaited(_chatService.updateChatActivity(chatId, null));
+
+    if (NotificationService.activeChatId == widget.chat['id']?.toString()) {
+      NotificationService.activeChatId = null;
     }
     super.dispose();
   }
@@ -119,10 +175,16 @@ class _ChatScreenState extends State<ChatScreen> {
     return null;
   }
 
-  bool get _isDesktop =>
-      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+  bool get _isDesktop => isDesktopPlatform;
+  bool get isGroupChat => widget.chat['type']?.toString() == 'group';
 
   String get chatTitle {
+    if (isGroupChat) {
+      final g = widget.chat['groupName']?.toString() ??
+          widget.chat['title']?.toString();
+      if (g != null && g.isNotEmpty) return g;
+      return 'Group';
+    }
     final partner = widget.chat['partner'];
     if (partner is Map) {
       final name = partner['username']?.toString() ??
@@ -136,29 +198,36 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   String? get chatAvatarUrl {
+    if (isGroupChat) {
+      return _profileService
+          .resolveAvatarUrl(widget.chat['groupAvatarUrl']?.toString());
+    }
     final partner = widget.chat['partner'];
     if (partner is! Map) return null;
     return _profileService.resolveAvatarUrl(partner['avatarUrl']?.toString());
   }
 
-  Future<void> _refreshContactPresence() async {
-    if (chatId.isEmpty) return;
+  Future<void> _loadGroupMembers() async {
     try {
-      final presence = await _chatService.fetchPartnerPresence(chatId);
-      final isOnline = presence['isOnline'] == true;
-      final activity = presence['activity']?.toString();
-      final lastSeenAt = DateTime.tryParse(
-        presence['lastSeenAt']?.toString() ?? '',
-      );
-      if (mounted &&
-          (isContactOnline != isOnline ||
-              contactActivity != activity ||
-              contactLastSeenAt != lastSeenAt)) {
-        setState(() {
-          isContactOnline = isOnline;
-          contactActivity = activity;
-          contactLastSeenAt = lastSeenAt;
-        });
+      final res = await Api().get('/groups/$chatId');
+      if (res.isNotEmpty && res.first is Map) {
+        final info = Map<String, dynamic>.from(res.first as Map);
+        final members = (info['members'] as List?) ?? [];
+        final map = <String, String>{};
+        for (final m in members) {
+          if (m is Map) {
+            final uid =
+                m['userId']?.toString() ?? m['user_id']?.toString() ?? '';
+            final uname = m['username']?.toString() ?? 'User';
+            if (uid.isNotEmpty) map[uid] = uname;
+          }
+        }
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _senderNames = map;
+            _groupMemberCount = members.length;
+          });
+        }
       }
     } catch (_) {}
   }
@@ -183,14 +252,13 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final list = await _chatService.fetchMessages(chatId);
       if (_hasUnreadIncoming(list) &&
-          WidgetsBinding.instance.lifecycleState ==
-              AppLifecycleState.resumed) {
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         try {
           await _chatService.markChatRead(chatId);
         } catch (_) {}
         unawaited(NotificationService().cancelChatNotifications(chatId));
       }
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() {
           final pending = messages.where((message) {
             return message is Map &&
@@ -201,79 +269,29 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => isLoading = false);
+      if (mounted && !_isDisposed) setState(() => isLoading = false);
     } finally {
       isRefreshingMessages = false;
     }
   }
 
-  void _initSocket() async {
-    final token = await Api().getToken();
-    if (token == null || !mounted) return;
-
-    final socketUrl =
-        apiUrl.endsWith('/messenger') ? apiUrl : '$apiUrl/messenger';
-    _socket = IO.io(
-      socketUrl,
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .setAuth({'token': token})
-          .enableAutoConnect()
-          .build(),
-    );
-
-    _socket?.on('message:status_updated', (data) {
-      if (!mounted) return;
-      if (data is Map && data['messageId'] != null && data['status'] != null) {
-        final targetChatId = data['chatId']?.toString();
-        if (targetChatId != null && targetChatId != chatId) return;
-
-        final msgId = data['messageId'].toString();
-        final newStatus = data['status'].toString();
-
-        setState(() {
-          final index =
-              messages.indexWhere((m) => m['id']?.toString() == msgId);
-          if (index != -1) {
-            messages[index]['status'] = newStatus;
-          }
-        });
-      }
-    });
-  }
-
-  void _onTextChanged(String value) {
-    if (value.trim().isEmpty) {
-      typingDebounceTimer?.cancel();
-      if (_myActivity == 'typing') unawaited(_setMyActivity(null));
-      return;
+  void _scrollToMessage(String messageId) {
+    final index =
+        messages.indexWhere((m) => (m as Map)['id']?.toString() == messageId);
+    if (index == -1) return;
+    setState(() => _highlightMessageId = messageId);
+    final visible = messages
+        .where((m) =>
+            (m as Map)['isDeleted'] != true && (m as Map)['is_deleted'] != true)
+        .toList();
+    final vIndex =
+        visible.indexWhere((m) => (m as Map)['id']?.toString() == messageId);
+    if (vIndex != -1 && scrollController.hasClients) {
+      final offset =
+          (vIndex * 80.0).clamp(0.0, scrollController.position.maxScrollExtent);
+      scrollController.animateTo(offset,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
     }
-    unawaited(_setMyActivity('typing'));
-    typingDebounceTimer?.cancel();
-    typingDebounceTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (_myActivity == 'typing') unawaited(_setMyActivity(null));
-    });
-  }
-
-  Future<void> _setMyActivity(String? activity) async {
-    _myActivity = activity;
-    if (activity == null) {
-      activityHeartbeatTimer?.cancel();
-      activityHeartbeatTimer = null;
-    } else {
-      activityHeartbeatTimer ??= Timer.periodic(
-        const Duration(seconds: 4),
-        (_) {
-          final current = _myActivity;
-          if (current != null) {
-            unawaited(_chatService.updateChatActivity(chatId, current));
-          }
-        },
-      );
-    }
-    try {
-      await _chatService.updateChatActivity(chatId, activity);
-    } catch (_) {}
   }
 
   Future<void> _sendMessage({
@@ -282,8 +300,7 @@ class _ChatScreenState extends State<ChatScreen> {
     String? defaultContent,
   }) async {
     if (type == 'TEXT') {
-      typingDebounceTimer?.cancel();
-      if (_myActivity == 'typing') await _setMyActivity(null);
+      await _presenceController.setMyActivity(null);
     }
     var text = textController.text.trim();
     if (type == 'TEXT' && (text.isEmpty || text.length > 4000)) return;
@@ -291,9 +308,10 @@ class _ChatScreenState extends State<ChatScreen> {
       text = defaultContent ??
           (type == 'AUDIO'
               ? 'Voice message'
-              : (type == 'IMAGE' ? 'Image' : 'Video'));
+              : (type == 'IMAGE'
+                  ? 'Image'
+                  : (type == 'POLL' ? 'Poll' : 'Video')));
     }
-
     final tempMsg = {
       'id': 'local_${DateTime.now().millisecondsSinceEpoch}',
       'sender_id': currentUserId,
@@ -301,22 +319,15 @@ class _ChatScreenState extends State<ChatScreen> {
       'type': type,
       if (mediaId != null) 'mediaId': mediaId,
       'status': 'pending',
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': DateTime.now().toIso8601String()
     };
-
     setState(() {
       messages.add(tempMsg);
       textController.clear();
     });
-
     try {
-      final created = await _chatService.sendMessage(
-        chatId,
-        text,
-        type,
-        mediaId: mediaId,
-      );
-
+      final created =
+          await _chatService.sendMessage(chatId, text, type, mediaId: mediaId);
       if (mounted) {
         setState(() {
           final index = messages.indexWhere((m) => m['id'] == tempMsg['id']);
@@ -333,95 +344,74 @@ class _ChatScreenState extends State<ChatScreen> {
             messages[index]['status'] = 'failed';
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.toString().replaceFirst('Exception: ', ''),
-            ),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
+  }
+
+  void _retryMessage(String msgId) {
+    final idx =
+        messages.indexWhere((m) => (m as Map)['id']?.toString() == msgId);
+    if (idx == -1) return;
+    final old = Map<String, dynamic>.from(messages[idx] as Map);
+    setState(() => messages.removeAt(idx));
+    textController.text = old['content']?.toString() ?? '';
+    _sendMessage(
+        type: old['type']?.toString() ?? 'TEXT',
+        mediaId: old['mediaId']?.toString() ?? old['media_id']?.toString());
+  }
+
+  Future<void> _openCreatePoll() async {
+    final result = await CreatePollDialog.show(context);
+    if (result == null) return;
+    try {
+      final poll = await _pollService.createPoll(
+          chatId,
+          result['question'] as String,
+          List<String>.from(result['options'] as List),
+          isAnonymous: result['isAnonymous'] as bool? ?? false);
+      final pollId = poll['id']?.toString() ?? '';
+      if (pollId.isNotEmpty) {
+        textController.text = pollId;
+        await _sendMessage(type: 'POLL');
+      }
+      _fetchMessages();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', ''))));
       }
     }
   }
 
   Future<void> _startRecording() async {
-    final shouldContinue =
-        await MessageActionDialogs.showMicrophonePermissionDialog(context);
-    if (shouldContinue != true || !mounted) return;
-
-    try {
-      if (!await audioRecorder.hasPermission()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Microphone permission is required. Enable it in app settings to record voice messages.',
-              ),
-            ),
-          );
-        }
-        return;
-      }
-      recordingPath =
-          '${Directory.systemTemp.path}${Platform.pathSeparator}voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await audioRecorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: recordingPath!,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start recording: $e')),
-        );
-      }
-      return;
-    }
-    if (!mounted) return;
-    setState(() {
-      isRecording = true;
-      recordingSeconds = 0;
-    });
-    recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() => recordingSeconds++);
-      }
-    });
+    await _audioRecorder.startRecording(
+      context,
+      onUpdate: () {
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   Future<void> _cancelRecording() async {
-    recordingTimer?.cancel();
-    try {
-      await audioRecorder.stop();
-    } catch (_) {}
-    final path = recordingPath;
-    recordingPath = null;
-    if (path != null) {
-      try {
-        await File(path).delete();
-      } catch (_) {}
-    }
-    if (!mounted) return;
-    setState(() {
-      isRecording = false;
-      recordingSeconds = 0;
-    });
+    await _audioRecorder.cancelRecording(
+      onUpdate: () {
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   Future<void> _sendAudioRecording() async {
-    recordingTimer?.cancel();
-    final path = recordingPath;
-    String? recordedPath;
-    try {
-      recordedPath = await audioRecorder.stop();
-    } catch (_) {}
-    recordingPath = null;
-    final duration = recordingSeconds;
-    if (!mounted) return;
-    setState(() {
-      isRecording = false;
-      recordingSeconds = 0;
-    });
+    final path = _audioRecorder.recordingPath;
+    final duration = _audioRecorder.recordingSeconds;
+    final recordedPath = await _audioRecorder.stopRecording(
+      onUpdate: () {
+        if (mounted) setState(() {});
+      },
+    );
 
+    if (!mounted) return;
     await _mediaHandler.sendAudioRecording(
       context: context,
       isDesktop: _isDesktop,
@@ -434,11 +424,8 @@ class _ChatScreenState extends State<ChatScreen> {
         String? defaultContent,
       }) =>
           _sendMessage(
-        type: type,
-        mediaId: mediaId,
-        defaultContent: defaultContent,
-      ),
-      onSetActivity: _setMyActivity,
+              type: type, mediaId: mediaId, defaultContent: defaultContent),
+      onSetActivity: _presenceController.setMyActivity,
     );
   }
 
@@ -446,15 +433,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final newMute = !isMuted;
     try {
       await _chatService.toggleMute(chatId, newMute);
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() => isMuted = newMute);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              newMute ? 'Notifications muted' : 'Notifications unmuted',
-            ),
-          ),
-        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  newMute ? 'Notifications muted' : 'Notifications unmuted')));
+        }
       }
     } catch (_) {}
   }
@@ -488,8 +474,7 @@ class _ChatScreenState extends State<ChatScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete message: $e')),
-          );
+              SnackBar(content: Text('Failed to delete message: $e')));
         }
       }
     }
@@ -515,29 +500,52 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _handleCloseChat() {
+    NotificationService.activeChatId = null;
+    if (widget.onClose != null) {
+      if (_isGroupInfoOpen && mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+        _isGroupInfoOpen = false;
+      }
+      widget.onClose!();
+    } else if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context, true);
+    }
+  }
+
+  void _openGroupInfo() async {
+    _isGroupInfoOpen = true;
+    final changed = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => GroupInfoScreen(groupId: chatId)),
+    );
+    _isGroupInfoOpen = false;
+    if (changed == true && mounted) {
+      _handleCloseChat();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: ChatAppBarTitle(
-          chatTitle: chatTitle,
-          chatAvatarUrl: chatAvatarUrl,
-          isContactOnline: isContactOnline,
-          contactActivity: contactActivity,
-          contactLastSeenAt: contactLastSeenAt,
-          onAvatarTap: () => _openImageViewer(chatAvatarUrl!),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(isMuted ? Icons.notifications_off : Icons.notifications),
-            tooltip: isMuted ? 'Unmute' : 'Mute',
-            onPressed: _toggleMute,
-          ),
-          if (partnerId != null)
-            IconButton(
-              icon: const Icon(Icons.person_outline),
-              tooltip: 'User profile',
-              onPressed: () {
+      appBar: ChatAppBar(
+        chatTitle: chatTitle,
+        chatAvatarUrl: chatAvatarUrl,
+        isGroupChat: isGroupChat,
+        groupMemberCount: _groupMemberCount,
+        isContactOnline: isContactOnline,
+        contactActivity: contactActivity,
+        contactLastSeenAt: contactLastSeenAt,
+        isMuted: isMuted,
+        partnerId: partnerId,
+        onAvatarTap: chatAvatarUrl == null
+            ? null
+            : () => _openImageViewer(chatAvatarUrl!),
+        onSearchTap: () => setState(() => _isSearchOpen = !_isSearchOpen),
+        onGroupInfoTap: isGroupChat ? _openGroupInfo : null,
+        onToggleMute: _toggleMute,
+        onUserProfileTap: (!isGroupChat && partnerId != null)
+            ? () {
                 UserProfileModal.show(
                   context,
                   userId: partnerId!,
@@ -545,18 +553,36 @@ class _ChatScreenState extends State<ChatScreen> {
                   avatarUrl: chatAvatarUrl,
                   profileService: _profileService,
                 );
-              },
-            ),
-        ],
+              }
+            : null,
       ),
       body: Column(
         children: [
+          ConnectivityBanner(isOffline: _isOffline),
+          if (_isSearchOpen)
+            ChatSearchBar(
+              chatId: chatId,
+              chatService: _chatService,
+              onNavigateToMessage: _scrollToMessage,
+              onClose: () => setState(() {
+                _isSearchOpen = false;
+                _highlightMessageId = null;
+                _searchQuery = null;
+              }),
+              onQueryChanged: (q) =>
+                  setState(() => _searchQuery = q.isEmpty ? null : q),
+            ),
           Expanded(
             child: ChatMessageList(
               scrollController: scrollController,
               isLoading: isLoading,
               messages: messages,
               currentUserId: currentUserId,
+              isGroupChat: isGroupChat,
+              highlightQuery: _searchQuery,
+              highlightMessageId: _highlightMessageId,
+              senderNames: _senderNames,
+              onRetryMessage: _retryMessage,
               formatMediaStreamUrl: (mediaId) =>
                   (mediaId != null && mediaId.isNotEmpty)
                       ? _chatService.formatMediaStreamUrl(mediaId)
@@ -567,10 +593,12 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           ChatInputBar(
             textController: textController,
-            isRecording: isRecording,
-            recordingSeconds: recordingSeconds,
+            isRecording: _audioRecorder.isRecording,
+            recordingSeconds: _audioRecorder.recordingSeconds,
             isDesktop: _isDesktop,
-            onTextChanged: _onTextChanged,
+            isGroupChat: isGroupChat,
+            onPollCreate: isGroupChat ? _openCreatePoll : null,
+            onTextChanged: _presenceController.onTextChanged,
             onStartRecording: _startRecording,
             onCancelRecording: _cancelRecording,
             onSendRecording: _sendAudioRecording,
@@ -580,7 +608,7 @@ class _ChatScreenState extends State<ChatScreen> {
               source: source,
               isDesktop: _isDesktop,
               onSendMessage: _sendMessage,
-              onSetActivity: _setMyActivity,
+              onSetActivity: _presenceController.setMyActivity,
             ),
             onSendVideo: (ImageSource source, {dynamic selectedFile}) =>
                 _mediaHandler.sendVideo(
@@ -589,18 +617,18 @@ class _ChatScreenState extends State<ChatScreen> {
               isDesktop: _isDesktop,
               selectedFile: selectedFile,
               onSendMessage: _sendMessage,
-              onSetActivity: _setMyActivity,
+              onSetActivity: _presenceController.setMyActivity,
             ),
             onPickVideoFile: () => _mediaHandler.pickAndSendVideoFile(
               context: context,
               isDesktop: _isDesktop,
               onSendMessage: _sendMessage,
-              onSetActivity: _setMyActivity,
+              onSetActivity: _presenceController.setMyActivity,
             ),
             onPickAudio: () => _mediaHandler.pickAndSendAudio(
               context: context,
               onSendMessage: _sendMessage,
-              onSetActivity: _setMyActivity,
+              onSetActivity: _presenceController.setMyActivity,
             ),
           ),
         ],

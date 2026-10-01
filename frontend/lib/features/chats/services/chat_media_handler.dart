@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
@@ -65,6 +65,16 @@ class ChatMediaHandler {
     }) onSendMessage,
     required Future<void> Function(String?) onSetActivity,
   }) async {
+    if (kIsWeb) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Audio recording is not supported in web browser.'),
+          ),
+        );
+      }
+      return;
+    }
     if (isDesktop) {
       final XFile? file = await openFile(acceptedTypeGroups: [audioTypeGroup]);
       if (file == null) return;
@@ -96,8 +106,8 @@ class ChatMediaHandler {
       } finally {
         await onSetActivity(null);
       }
-    } else if (recordedPath != null && await File(recordedPath).exists()) {
-      final bytes = await File(recordedPath).readAsBytes();
+    } else if (recordedPath != null && recordedPath.isNotEmpty) {
+      final bytes = await XFile(recordedPath).readAsBytes();
       if (bytes.isEmpty) return;
       await onSetActivity('sending_audio');
       try {
@@ -120,16 +130,8 @@ class ChatMediaHandler {
         }
       } finally {
         await onSetActivity(null);
-        try {
-          await File(recordedPath).delete();
-        } catch (_) {}
       }
     } else {
-      if (fallbackRecordingPath != null) {
-        try {
-          await File(fallbackRecordingPath).delete();
-        } catch (_) {}
-      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -194,7 +196,7 @@ class ChatMediaHandler {
     List<int> bytes;
     String filename;
 
-    if (isDesktop) {
+    if (isDesktop || kIsWeb) {
       final XFile? file = await openFile(acceptedTypeGroups: [imageTypeGroup]);
       if (file == null) return;
       bytes = await file.readAsBytes();
@@ -245,27 +247,21 @@ class ChatMediaHandler {
     required Future<void> Function(String?) onSetActivity,
   }) async {
     List<int> bytes = <int>[];
-    String filename;
-    final generatedFiles = <String>[];
+    String filename = '';
     var originalSize = 0;
 
-    if (isDesktop) {
+    if (isDesktop || kIsWeb) {
       final XFile? file =
           selectedFile ?? await openFile(acceptedTypeGroups: [videoTypeGroup]);
       if (file == null) return;
-      originalSize = await File(file.path).length();
-      if (originalSize <= maxVideoSize) {
-        bytes = await file.readAsBytes();
-      }
+      bytes = await file.readAsBytes();
+      originalSize = bytes.length;
       filename = file.name;
     } else {
       final picked =
           selectedFile ?? await ImagePicker().pickVideo(source: source);
       if (picked == null) return;
-      final originalFile = File(picked.path);
-      originalSize = await originalFile.length();
       filename = picked.name;
-
       try {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -279,11 +275,9 @@ class ChatMediaHandler {
           includeAudio: true,
         );
         final outputPath = compressed?.path;
-        if (outputPath != null && await File(outputPath).exists()) {
-          generatedFiles.add(outputPath);
-          final compressedFile = File(outputPath);
-          if (await compressedFile.length() <= maxVideoSize) {
-            bytes = await compressedFile.readAsBytes();
+        if (outputPath != null && outputPath.isNotEmpty) {
+          bytes = await XFile(outputPath).readAsBytes();
+          if (bytes.isNotEmpty && bytes.length <= maxVideoSize) {
             filename = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
           }
         }
@@ -295,28 +289,22 @@ class ChatMediaHandler {
             includeAudio: true,
           );
           final smallerPath = smaller?.path;
-          if (smallerPath != null && await File(smallerPath).exists()) {
-            generatedFiles.add(smallerPath);
-            final smallerFile = File(smallerPath);
-            if (await smallerFile.length() <= maxVideoSize) {
-              bytes = await smallerFile.readAsBytes();
+          if (smallerPath != null && smallerPath.isNotEmpty) {
+            bytes = await XFile(smallerPath).readAsBytes();
+            if (bytes.isNotEmpty && bytes.length <= maxVideoSize) {
               filename = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
             }
           }
         }
       } catch (_) {}
-      if (bytes.isEmpty && originalSize <= maxVideoSize) {
-        bytes = await originalFile.readAsBytes();
+      if (bytes.isEmpty) {
+        bytes = await picked.readAsBytes();
+        originalSize = bytes.length;
       }
       if (context.mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
     }
 
     if (bytes.isEmpty) {
-      for (final path in generatedFiles) {
-        try {
-          await File(path).delete();
-        } catch (_) {}
-      }
       if (context.mounted) {
         final message = originalSize > maxVideoSize
             ? isDesktop
@@ -330,11 +318,6 @@ class ChatMediaHandler {
     }
 
     if (bytes.length > maxVideoSize) {
-      for (final path in generatedFiles) {
-        try {
-          await File(path).delete();
-        } catch (_) {}
-      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -358,11 +341,6 @@ class ChatMediaHandler {
       }
     } finally {
       await onSetActivity(null);
-      for (final path in generatedFiles) {
-        try {
-          await File(path).delete();
-        } catch (_) {}
-      }
     }
   }
 

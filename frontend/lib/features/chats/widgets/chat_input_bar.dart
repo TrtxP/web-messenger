@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-class ChatInputBar extends StatelessWidget {
+class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
     super.key,
     required this.textController,
@@ -17,6 +18,8 @@ class ChatInputBar extends StatelessWidget {
     required this.onSendVideo,
     required this.onPickVideoFile,
     required this.onPickAudio,
+    this.onPollCreate,
+    this.isGroupChat = false,
   });
 
   final TextEditingController textController;
@@ -32,63 +35,104 @@ class ChatInputBar extends StatelessWidget {
   final Future<void> Function(ImageSource source) onSendVideo;
   final VoidCallback onPickVideoFile;
   final VoidCallback onPickAudio;
+  final VoidCallback? onPollCreate;
+  final bool isGroupChat;
+
+  @override
+  State<ChatInputBar> createState() => _ChatInputBarState();
+}
+
+class _ChatInputBarState extends State<ChatInputBar> {
+  late final FocusNode _inputFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _inputFocusNode = FocusNode(onKeyEvent: _handleKeyEvent);
+  }
+
+  @override
+  void dispose() {
+    _inputFocusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      if (event is KeyDownEvent) {
+        widget.onSendMessage();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   void _showAttachmentSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => Wrap(
         children: [
-          if (!isDesktop)
+          if (!widget.isDesktop)
             ListTile(
               leading: const Icon(Icons.photo_camera),
               title: const Text('Take photo'),
               onTap: () {
                 Navigator.pop(ctx);
-                onSendImage(ImageSource.camera);
+                widget.onSendImage(ImageSource.camera);
               },
             ),
           ListTile(
             leading: const Icon(Icons.photo_library),
-            title: Text(isDesktop ? 'Choose image file' : 'Photo'),
+            title: Text(widget.isDesktop ? 'Choose image file' : 'Photo'),
             onTap: () {
               Navigator.pop(ctx);
-              onSendImage(ImageSource.gallery);
+              widget.onSendImage(ImageSource.gallery);
             },
           ),
-          if (!isDesktop)
+          if (!widget.isDesktop)
             ListTile(
               leading: const Icon(Icons.videocam),
               title: const Text('Record video'),
               onTap: () {
                 Navigator.pop(ctx);
-                onSendVideo(ImageSource.camera);
+                widget.onSendVideo(ImageSource.camera);
               },
             ),
           ListTile(
             leading: const Icon(Icons.video_library),
-            title: Text(isDesktop ? 'Choose video file' : 'Video from gallery'),
+            title: Text(widget.isDesktop ? 'Choose video file' : 'Video from gallery'),
             onTap: () {
               Navigator.pop(ctx);
-              onSendVideo(ImageSource.gallery);
+              widget.onSendVideo(ImageSource.gallery);
             },
           ),
-          if (!isDesktop)
+          if (!widget.isDesktop)
             ListTile(
               leading: const Icon(Icons.folder_open),
               title: const Text('Choose video file'),
               onTap: () {
                 Navigator.pop(ctx);
-                onPickVideoFile();
+                widget.onPickVideoFile();
               },
             ),
           ListTile(
             leading: const Icon(Icons.audiotrack),
-            title: Text(isDesktop ? 'Choose audio file' : 'Audio'),
+            title: Text(widget.isDesktop ? 'Choose audio file' : 'Audio'),
             onTap: () {
               Navigator.pop(ctx);
-              onPickAudio();
+              widget.onPickAudio();
             },
           ),
+          if (widget.isGroupChat && widget.onPollCreate != null)
+            ListTile(
+              leading: const Icon(Icons.bar_chart),
+              title: const Text('Create poll'),
+              onTap: () {
+                Navigator.pop(ctx);
+                widget.onPollCreate!();
+              },
+            ),
         ],
       ),
     );
@@ -96,9 +140,9 @@ class ChatInputBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isRecording) {
-      final minutes = (recordingSeconds ~/ 60).toString();
-      final seconds = (recordingSeconds % 60).toString().padLeft(2, '0');
+    if (widget.isRecording) {
+      final minutes = (widget.recordingSeconds ~/ 60).toString();
+      final seconds = (widget.recordingSeconds % 60).toString().padLeft(2, '0');
 
       return SafeArea(
         child: Container(
@@ -112,12 +156,12 @@ class ChatInputBar extends StatelessWidget {
               const Spacer(),
               TextButton(
                 key: const Key('cancel_record_button'),
-                onPressed: onCancelRecording,
+                onPressed: widget.onCancelRecording,
                 child: const Text('Cancel'),
               ),
               IconButton(
                 icon: const Icon(Icons.send, color: Colors.blue),
-                onPressed: onSendRecording,
+                onPressed: widget.onSendRecording,
               ),
             ],
           ),
@@ -139,17 +183,27 @@ class ChatInputBar extends StatelessWidget {
               icon: const Icon(Icons.attach_file),
               onPressed: () => _showAttachmentSheet(context),
             ),
+            if (widget.isGroupChat && widget.onPollCreate != null)
+              IconButton(
+                icon: const Icon(Icons.bar_chart),
+                tooltip: 'Create poll',
+                onPressed: widget.onPollCreate,
+              ),
             IconButton(
               key: const Key('mic_button'),
               icon: const Icon(Icons.mic),
-              onPressed: isDesktop ? onSendRecording : onStartRecording,
+              onPressed: widget.isDesktop ? widget.onSendRecording : widget.onStartRecording,
             ),
             Expanded(
               child: TextField(
-                controller: textController,
-                onChanged: onTextChanged,
-                maxLines: 4,
+                controller: widget.textController,
+                focusNode: _inputFocusNode,
+                onChanged: widget.onTextChanged,
+                onSubmitted: (_) => widget.onSendMessage(),
+                maxLines: null,
                 minLines: 1,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
                 decoration: const InputDecoration(
                   hintText: 'Type a message...',
                   border: InputBorder.none,
@@ -159,7 +213,7 @@ class ChatInputBar extends StatelessWidget {
             IconButton(
               key: const Key('send_message_button'),
               icon: const Icon(Icons.send, color: Colors.blue),
-              onPressed: onSendMessage,
+              onPressed: widget.onSendMessage,
             ),
           ],
         ),

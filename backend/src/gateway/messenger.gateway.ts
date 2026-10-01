@@ -90,6 +90,17 @@ export class MessengerGateway implements OnGatewayInit, OnGatewayConnection, OnG
     }
   }
 
+  notifyGroupInvitation(targetUserId: string, payload: { chatId: string; groupName: string; invitationId: string }) {
+    this.server?.to(`user:${targetUserId}`).emit('group:invitation', payload);
+  }
+
+  async notifyGroupMemberUpdate(chatId: string, payload: { userId: string; action: 'joined' | 'left' | 'removed' }) {
+    const members = await this.getChatMembers(chatId).catch(() => [] as string[]);
+    for (const memberId of members) {
+      this.server?.to(`user:${memberId}`).emit('group:member_updated', { chatId, ...payload });
+    }
+  }
+
   notifyInvitationResolved(targetUserId: string, payload: {
     invitationId: string,
     status: 'accepted' | 'declined',

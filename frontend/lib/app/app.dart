@@ -9,7 +9,7 @@ class MessengerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: NotificationService.navigatorKey,
-      title: 'Mobile Messenger',
+      title: 'Web Messenger',
       theme: ThemeData(
         colorSchemeSeed: Colors.indigo,
         useMaterial3: true,

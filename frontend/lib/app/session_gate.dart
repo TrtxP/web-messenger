@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/network/api_client.dart';
 
 import '../features/auth/screens/auth_screen.dart';
-import '../features/chats/screens/home_screen.dart';
+import 'responsive_shell.dart';
 
 class SessionGate extends StatefulWidget {
   const SessionGate({super.key});
@@ -50,10 +50,6 @@ class _SessionGateState extends State<SessionGate> {
         onAuthenticated: (value) => setState(() => user = value),
       );
     }
-    return HomeScreen(
-      user: user!,
-      onLogout: handleLogout,
-      promptNotificationPermission: true,
-    );
+    return ResponsiveShell(user: user!, onLogout: handleLogout);
   }
 }

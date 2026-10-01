@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'password_requirements_widget.dart';
 
-class PasswordRecoveryForm extends StatelessWidget {
+class PasswordRecoveryForm extends StatefulWidget {
   const PasswordRecoveryForm({
     super.key,
     required this.emailController,
@@ -26,7 +26,51 @@ class PasswordRecoveryForm extends StatelessWidget {
   final VoidCallback onBackToSignIn;
 
   @override
+  State<PasswordRecoveryForm> createState() => _PasswordRecoveryFormState();
+}
+
+class _PasswordRecoveryFormState extends State<PasswordRecoveryForm> {
+  bool _obscureNewPassword = true;
+  late final FocusNode _newPasswordFocusNode = FocusNode();
+  late final FocusNode _toggleButtonFocusNode = FocusNode(
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+
+  @override
+  void dispose() {
+    _newPasswordFocusNode.dispose();
+    _toggleButtonFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _toggleNewPasswordVisibility() {
+    final controller = widget.newPasswordController;
+    final previousSelection = controller.selection;
+    setState(() {
+      _obscureNewPassword = !_obscureNewPassword;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_newPasswordFocusNode.hasFocus) {
+        _newPasswordFocusNode.requestFocus();
+      }
+      final textLength = controller.text.length;
+      if (previousSelection.isValid) {
+        final base = previousSelection.baseOffset.clamp(0, textLength);
+        final extent = previousSelection.extentOffset.clamp(0, textLength);
+        controller.selection = previousSelection.copyWith(
+          baseOffset: base,
+          extentOffset: extent,
+        );
+      } else {
+        controller.selection = TextSelection.collapsed(offset: textLength);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final recoveryCodeSent = widget.recoveryCodeSent;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -45,42 +89,56 @@ class PasswordRecoveryForm extends StatelessWidget {
         const SizedBox(height: 16),
         TextField(
           key: const Key('recovery_email_field'),
-          controller: emailController,
+          controller: widget.emailController,
           decoration: const InputDecoration(labelText: 'Registered Email'),
         ),
         if (recoveryCodeSent) ...[
           const SizedBox(height: 8),
           TextField(
             key: const Key('recovery_otp_field'),
-            controller: otpController,
+            controller: widget.otpController,
             decoration:
                 const InputDecoration(labelText: '6-digit Recovery Code'),
           ),
           const SizedBox(height: 8),
           TextField(
             key: const Key('recovery_new_password_field'),
-            controller: newPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'New Password'),
+            controller: widget.newPasswordController,
+            focusNode: _newPasswordFocusNode,
+            obscureText: _obscureNewPassword,
+            decoration: InputDecoration(
+              labelText: 'New Password',
+              suffixIcon: IconButton(
+                key: const Key('toggle_new_password_visibility'),
+                icon: Icon(
+                  _obscureNewPassword ? Icons.visibility_off : Icons.visibility,
+                ),
+                tooltip:
+                    _obscureNewPassword ? 'Show password' : 'Hide password',
+                focusNode: _toggleButtonFocusNode,
+                onPressed: _toggleNewPasswordVisibility,
+              ),
+            ),
           ),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: PasswordRequirementsWidget(
-              password: newPasswordController.text,
+              password: widget.newPasswordController.text,
             ),
           ),
         ],
-        if (error != null)
+        if (widget.error != null)
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
-            child: Text(error!, style: const TextStyle(color: Colors.red)),
+            child:
+                Text(widget.error!, style: const TextStyle(color: Colors.red)),
           ),
-        if (successMessage != null)
+        if (widget.successMessage != null)
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
             child: Text(
-              successMessage!,
+              widget.successMessage!,
               style: const TextStyle(color: Colors.green),
             ),
           ),
@@ -89,12 +147,13 @@ class PasswordRecoveryForm extends StatelessWidget {
           key: recoveryCodeSent
               ? const Key('submit_recovery_button')
               : const Key('send_recovery_button'),
-          onPressed: recoveryCodeSent ? onResetPassword : onSendCode,
+          onPressed:
+              recoveryCodeSent ? widget.onResetPassword : widget.onSendCode,
           child: Text(recoveryCodeSent ? 'Reset Password' : 'Send Code'),
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: onBackToSignIn,
+          onPressed: widget.onBackToSignIn,
           child: const Text('Back to Sign in'),
         ),
       ],
