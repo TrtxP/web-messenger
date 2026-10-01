@@ -9,6 +9,8 @@ class ChatAppBarTitle extends StatelessWidget {
     this.contactActivity,
     this.contactLastSeenAt,
     this.onAvatarTap,
+    this.isGroupChat = false,
+    this.groupSubtitle,
   });
 
   final String chatTitle;
@@ -17,6 +19,8 @@ class ChatAppBarTitle extends StatelessWidget {
   final String? contactActivity;
   final DateTime? contactLastSeenAt;
   final VoidCallback? onAvatarTap;
+  final bool isGroupChat;
+  final String? groupSubtitle;
 
   String _formatLastSeen(DateTime value) {
     final local = value.toLocal();
@@ -46,7 +50,7 @@ class ChatAppBarTitle extends StatelessWidget {
                       )
                     : null,
               ),
-              if (isContactOnline)
+              if (!isGroupChat && isContactOnline)
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -79,7 +83,20 @@ class ChatAppBarTitle extends StatelessWidget {
                 style:
                     const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
-              if (isContactOnline &&
+              if (isGroupChat)
+                if (groupSubtitle != null && groupSubtitle!.isNotEmpty)
+                  Text(
+                    groupSubtitle!,
+                    key: const Key('group_subtitle'),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  const SizedBox.shrink()
+              else if (isContactOnline &&
                   contactActivity != null &&
                   contactActivity!.isNotEmpty)
                 Text(

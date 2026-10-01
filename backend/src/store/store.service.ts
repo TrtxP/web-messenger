@@ -208,6 +208,62 @@ export class StoreService implements OnModuleInit, OnModuleDestroy {
     return this.chatsStore.message(chatId, senderId, text);
   }
 
+  searchMessages(chatId: string, userId: string, query: string, limit = 50) {
+    return this.chatsStore.searchMessages(chatId, userId, query, limit);
+  }
+
+  createGroup(creatorId: string, name: string, memberIds: string[]) {
+    return this.chatsStore.createGroup(creatorId, name, memberIds);
+  }
+
+  getGroupInfo(groupId: string, userId: string) {
+    return this.chatsStore.getGroupInfo(groupId, userId);
+  }
+
+  updateGroup(groupId: string, userId: string, name?: string, avatarPath?: string) {
+    return this.chatsStore.updateGroup(groupId, userId, name, avatarPath);
+  }
+
+  inviteToGroup(groupId: string, fromId: string, userIds: string[]) {
+    return this.chatsStore.inviteToGroup(groupId, fromId, userIds);
+  }
+
+  getPendingGroupInvitations(userId: string) {
+    return this.chatsStore.getPendingGroupInvitations(userId);
+  }
+
+  acceptGroupInvitation(invId: string, userId: string) {
+    return this.chatsStore.acceptGroupInvitation(invId, userId);
+  }
+
+  declineGroupInvitation(invId: string, userId: string) {
+    return this.chatsStore.declineGroupInvitation(invId, userId);
+  }
+
+  removeGroupMember(groupId: string, requesterId: string, targetUserId: string) {
+    return this.chatsStore.removeGroupMember(groupId, requesterId, targetUserId);
+  }
+
+  createPoll(chatId: string, creatorId: string, question: string, options: string[], isAnonymous = false) {
+    return this.chatsStore.createPoll(chatId, creatorId, question, options, isAnonymous);
+  }
+
+  getPoll(pollId: string, userId: string) {
+    return this.chatsStore.getPoll(pollId, userId);
+  }
+
+  votePoll(pollId: string, userId: string, optionId: string) {
+    return this.chatsStore.votePoll(pollId, userId, optionId);
+  }
+
+  retractPollVote(pollId: string, userId: string) {
+    return this.chatsStore.retractPollVote(pollId, userId);
+  }
+
+  closePoll(pollId: string, userId: string) {
+    return this.chatsStore.closePoll(pollId, userId);
+  }
+
   saveMediaRecord(
     mediaId: string,
     uploaderId: string,

@@ -133,6 +133,20 @@ export class ChatsController {
     return this.store.getMessages(chatId, req.user.id, limitNum);
   }
 
+  @Get(':id/messages/search')
+  @UseGuards(AuthGuard)
+  async searchMessages(
+    @Req() req: any,
+    @Param('id') chatId: string,
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+    return this.store.searchMessages(chatId, req.user.id, query.trim(), limit ? parseInt(limit) : 50);
+  }
+
   @Post(':id/read')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)

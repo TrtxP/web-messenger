@@ -1,17 +1,20 @@
 // ignore_for_file: library_prefixes
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_messenger/main.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../../../core/services/notification_service.dart';
+import '../../../core/widgets/connectivity_banner.dart';
 import '../../profile/services/profile_service.dart';
 import '../../profile/screens/profile_screen.dart';
 import '../../profile/widgets/user_profile_modal.dart';
 import '../../invitations/screens/invitations_screen.dart';
 import '../services/chat_service.dart';
 import '../widgets/full_screen_image_viewer.dart';
+import '../../groups/screens/create_group_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -21,18 +24,26 @@ class HomeScreen extends StatefulWidget {
     this.api,
     this.chatService,
     this.promptNotificationPermission = false,
+    this.onChatSelected,
+    this.onOpenSecondPanel,
+    this.onChatDeleted,
   });
   final Map<String, dynamic> user;
   final VoidCallback onLogout;
   final Api? api;
   final ChatService? chatService;
   final bool promptNotificationPermission;
+  final void Function(Map<String, dynamic> chat)? onChatSelected;
+  final void Function(Map<String, dynamic> chat)? onOpenSecondPanel;
+  final void Function(String chatId)? onChatDeleted;
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
+  Future<void> fetchChats({bool showLoading = true}) =>
+      _fetchChats(showLoading: showLoading);
   late final Api api = widget.api ?? Api();
   late final ChatService chatService = widget.chatService ?? ChatService();
   final profileService = ProfileService();
@@ -49,6 +60,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isFirstChatLoad = true;
   bool _isFirstInviteLoad = true;
   bool _askedNotificationPermission = false;
+  bool _isOffline = false;
+  int _reconnectAttempts = 0;
+  Timer? _reconnectTimer;
 
   @override
   void initState() {
@@ -70,7 +84,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     presenceTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _markPresence();
-      _checkInvitations();
     });
     chatRefreshTimer = Timer.periodic(
       const Duration(seconds: 5),
@@ -78,10 +91,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  bool _isDisposed = false;
+
   @override
   void dispose() {
+    _isDisposed = true;
+    _socket?.clearListeners();
     _socket?.disconnect();
     _socket?.dispose();
+    _reconnectTimer?.cancel();
     chatRefreshTimer?.cancel();
     presenceTimer?.cancel();
     super.dispose();
@@ -94,13 +112,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchChats({bool showLoading = true}) async {
-    if (isFetchingChats) return;
+    if (isFetchingChats || _isDisposed) return;
     isFetchingChats = true;
-    if (showLoading && mounted) setState(() => isLoading = true);
+    if (showLoading && mounted && !_isDisposed) {
+      setState(() => isLoading = true);
+    }
     try {
       final list =
           await api.get('/chats${showingArchived ? '?archived=true' : ''}');
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         final newChats = List.from(list);
         _checkAndNotifyNewMessages(newChats);
         _markDeliveredForIncomingChats(newChats);
@@ -121,9 +141,9 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() => isLoading = false);
-        if (showLoading) {
+        if (showLoading && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content:
@@ -251,9 +271,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       }
-    } catch (e) {
-      debugPrint('[HomeScreen] _checkInvitations error: $e');
-    }
+    } catch (_) {}
   }
 
   void _initSocketListener() async {
@@ -268,6 +286,9 @@ class _HomeScreenState extends State<HomeScreen> {
           .enableAutoConnect()
           .build(),
     );
+
+    _socket?.onConnect((_) => _onSocketConnect());
+    _socket?.onDisconnect((_) => _onSocketDisconnect());
 
     _socket?.on('invitation:resolved', (data) {
       final status = data['status'];
@@ -284,6 +305,32 @@ class _HomeScreenState extends State<HomeScreen> {
             title: 'Invitation rejected',
             body: 'User $name rejected your invitation.');
       }
+    });
+    _socket?.on('chat:deleted', (data) {
+      final deletedChatId = data is Map ? data['chatId']?.toString() : null;
+      if (deletedChatId != null) {
+        widget.onChatDeleted?.call(deletedChatId);
+      }
+      _fetchChats(showLoading: false);
+    });
+    _socket?.on('group:invitation', (_) => _fetchChats(showLoading: false));
+    _socket?.on('group:member_updated', (_) => _fetchChats(showLoading: false));
+  }
+
+  void _onSocketConnect() {
+    _reconnectAttempts = 0;
+    _reconnectTimer?.cancel();
+    if (mounted) setState(() => _isOffline = false);
+  }
+
+  void _onSocketDisconnect() {
+    if (mounted) setState(() => _isOffline = true);
+    _reconnectTimer?.cancel();
+    final delay = Duration(
+        milliseconds: min(1000 * pow(2, _reconnectAttempts).toInt(), 30000));
+    _reconnectTimer = Timer(delay, () {
+      _reconnectAttempts++;
+      _initSocketListener();
     });
   }
 
@@ -352,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ));
     try {
       await chatService.deleteChat(chatId);
+      widget.onChatDeleted?.call(chatId);
     } catch (_) {
       await _fetchChats();
       if (mounted) {
@@ -483,194 +531,279 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : activeChats.isEmpty
-              ? Center(
-                  child: Text(
-                    showingArchived
-                        ? 'No archived chats'
-                        : 'No chats yet. Search for users to invite them!',
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _fetchChats,
-                  child: ListView.builder(
-                    itemCount: activeChats.length,
-                    itemBuilder: (context, index) {
-                      final chat = activeChats[index] as Map<String, dynamic>;
-                      final chatId = chat['id']?.toString() ?? 'chat_$index';
-                      final partner = chat['partner'];
-                      final avatarUrl = partner is Map
-                          ? profileService.resolveAvatarUrl(
-                              partner['avatarUrl']?.toString())
-                          : null;
-                      final title = (partner is Map
-                              ? (partner['username']?.toString() ??
-                                  partner['name']?.toString())
-                              : null) ??
-                          (chat['title']?.toString().isNotEmpty == true &&
-                                  chat['title'] != 'Chat'
-                              ? chat['title'].toString()
-                              : null) ??
-                          'Chat';
-                      final lastMessageObj = chat['lastMessage'];
-                      final lastMsg = lastMessageObj is Map
-                          ? (lastMessageObj['content']?.toString() ??
-                              lastMessageObj['text']?.toString() ??
-                              '')
-                          : '';
-                      final unreadCount = (chat['unreadCount'] as int?) ?? 0;
+      body: Column(
+        children: [
+          ConnectivityBanner(isOffline: _isOffline),
+          Expanded(
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : activeChats.isEmpty
+                    ? Center(
+                        child: Text(
+                          showingArchived
+                              ? 'No archived chats'
+                              : 'No chats yet. Search for users to invite them!',
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _fetchChats,
+                        child: ListView.builder(
+                          itemCount: activeChats.length,
+                          itemBuilder: (context, index) {
+                            final chat =
+                                activeChats[index] as Map<String, dynamic>;
+                            final chatId =
+                                chat['id']?.toString() ?? 'chat_$index';
+                            final isGroup = chat['type']?.toString() == 'group';
+                            final partner = chat['partner'];
+                            final avatarUrl = isGroup
+                                ? (chat['groupAvatarUrl']
+                                            ?.toString()
+                                            .isNotEmpty ==
+                                        true
+                                    ? profileService.resolveAvatarUrl(
+                                        chat['groupAvatarUrl']?.toString())
+                                    : null)
+                                : (partner is Map
+                                    ? profileService.resolveAvatarUrl(
+                                        partner['avatarUrl']?.toString())
+                                    : null);
+                            final title = isGroup
+                                ? (chat['groupName']?.toString().isNotEmpty ==
+                                        true
+                                    ? chat['groupName'].toString()
+                                    : (chat['title']?.toString().isNotEmpty ==
+                                            true
+                                        ? chat['title'].toString()
+                                        : 'Group'))
+                                : ((partner is Map
+                                        ? (partner['username']?.toString() ??
+                                            partner['name']?.toString())
+                                        : null) ??
+                                    (chat['title']?.toString().isNotEmpty ==
+                                                true &&
+                                            chat['title'] != 'Chat'
+                                        ? chat['title'].toString()
+                                        : null) ??
+                                    'Chat');
+                            final lastMessageObj = chat['lastMessage'];
+                            final lastMsg = lastMessageObj is Map
+                                ? (lastMessageObj['content']?.toString() ??
+                                    lastMessageObj['text']?.toString() ??
+                                    '')
+                                : '';
+                            final unreadCount =
+                                (chat['unreadCount'] as int?) ?? 0;
 
-                      return Dismissible(
-                        key: Key(chatId),
-                        direction: DismissDirection.horizontal,
-                        background: Container(
-                          color: Colors.red,
-                          alignment: Alignment.centerLeft,
-                          padding: const EdgeInsets.only(left: 20),
-                          child: const Icon(
-                            Icons.delete,
-                            color: Colors.white,
-                          ),
-                        ),
-                        secondaryBackground: Container(
-                          color: Colors.blueGrey,
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20),
-                          child: Icon(
-                            showingArchived ? Icons.unarchive : Icons.archive,
-                            color: Colors.white,
-                          ),
-                        ),
-                        confirmDismiss: (direction) async {
-                          if (direction == DismissDirection.startToEnd) {
-                            return _confirmDeleteChat(title);
-                          }
-                          return true;
-                        },
-                        onDismissed: (direction) {
-                          if (direction == DismissDirection.startToEnd) {
-                            unawaited(_deleteChat(chatId));
-                          } else {
-                            unawaited(
-                              _toggleArchive(chatId, !showingArchived),
-                            );
-                          }
-                        },
-                        child: RawGestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          gestures: <Type, GestureRecognizerFactory>{
-                            LongPressGestureRecognizer:
-                                GestureRecognizerFactoryWithHandlers<
-                                    LongPressGestureRecognizer>(
-                              () => LongPressGestureRecognizer(
-                                duration: const Duration(milliseconds: 1500),
+                            return Dismissible(
+                              key: Key(chatId),
+                              direction: DismissDirection.horizontal,
+                              background: Container(
+                                color: Colors.red,
+                                alignment: Alignment.centerLeft,
+                                padding: const EdgeInsets.only(left: 20),
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                ),
                               ),
-                              (recognizer) => recognizer.onLongPress =
-                                  () => _showChatActions(chatId, title),
-                            ),
-                          },
-                          child: ListTile(
-                            leading: Stack(
-                              children: [
-                                GestureDetector(
-                                  onTap: avatarUrl == null
-                                      ? null
-                                      : () => Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  FullScreenImageViewer(
-                                                imageUrl: avatarUrl,
-                                              ),
-                                            ),
+                              secondaryBackground: Container(
+                                color: Colors.blueGrey,
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                child: Icon(
+                                  showingArchived
+                                      ? Icons.unarchive
+                                      : Icons.archive,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              confirmDismiss: (direction) async {
+                                if (direction == DismissDirection.startToEnd) {
+                                  return _confirmDeleteChat(title);
+                                }
+                                return true;
+                              },
+                              onDismissed: (direction) {
+                                if (direction == DismissDirection.startToEnd) {
+                                  unawaited(_deleteChat(chatId));
+                                } else {
+                                  unawaited(
+                                    _toggleArchive(chatId, !showingArchived),
+                                  );
+                                }
+                              },
+                              child: RawGestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                gestures: <Type, GestureRecognizerFactory>{
+                                  LongPressGestureRecognizer:
+                                      GestureRecognizerFactoryWithHandlers<
+                                          LongPressGestureRecognizer>(
+                                    () => LongPressGestureRecognizer(
+                                      duration:
+                                          const Duration(milliseconds: 1500),
+                                    ),
+                                    (recognizer) =>
+                                        recognizer.onLongPress = () {
+                                      if (widget.onOpenSecondPanel != null) {
+                                        widget.onOpenSecondPanel!(chat);
+                                      } else {
+                                        _showChatActions(chatId, title);
+                                      }
+                                    },
+                                  ),
+                                },
+                                child: ListTile(
+                                  leading: Stack(
+                                    children: [
+                                      GestureDetector(
+                                        onTap: avatarUrl == null
+                                            ? null
+                                            : () => Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) =>
+                                                        FullScreenImageViewer(
+                                                      imageUrl: avatarUrl,
+                                                    ),
+                                                  ),
+                                                ),
+                                        child: CircleAvatar(
+                                          backgroundColor: isGroup
+                                              ? Colors.indigo.shade100
+                                              : null,
+                                          backgroundImage: avatarUrl == null
+                                              ? null
+                                              : NetworkImage(avatarUrl),
+                                          child: avatarUrl == null
+                                              ? (isGroup
+                                                  ? const Icon(Icons.group,
+                                                      color: Colors.indigo)
+                                                  : Text(title.isNotEmpty
+                                                      ? title[0].toUpperCase()
+                                                      : '?'))
+                                              : null,
+                                        ),
+                                      ),
+                                      if (!isGroup &&
+                                          partner is Map &&
+                                          partner['isOnline'] == true)
+                                        const Positioned(
+                                          right: 0,
+                                          bottom: 0,
+                                          child: CircleAvatar(
+                                            radius: 5,
+                                            backgroundColor: Colors.green,
                                           ),
-                                  child: CircleAvatar(
-                                    backgroundImage: avatarUrl == null
-                                        ? null
-                                        : NetworkImage(avatarUrl),
-                                    child: avatarUrl == null
-                                        ? Text(title.isNotEmpty
-                                            ? title[0].toUpperCase()
-                                            : '?')
-                                        : null,
+                                        ),
+                                    ],
                                   ),
+                                  title: Row(
+                                    children: [
+                                      Expanded(child: Text(title)),
+                                      if (isGroup)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 4),
+                                          child: Text(
+                                              '${chat['memberCount'] ?? ''}',
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey)),
+                                        ),
+                                      if (chat['isMuted'] == true)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 4),
+                                          child: Icon(
+                                            Icons.notifications_off,
+                                            size: 16,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  subtitle: Text(
+                                    lastMsg.isEmpty
+                                        ? 'No messages yet'
+                                        : lastMsg,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  trailing: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Text('Now',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey)),
+                                      if (unreadCount > 0)
+                                        Badge(
+                                            label: Text(unreadCount.toString()))
+                                      else
+                                        const SizedBox(height: 16),
+                                    ],
+                                  ),
+                                  onTap: () async {
+                                    if (widget.onChatSelected != null) {
+                                      widget.onChatSelected!(chat);
+                                      _currentOpenChatId = chatId;
+                                      NotificationService.activeChatId = chatId;
+                                      unawaited(
+                                        NotificationService()
+                                            .cancelChatNotifications(chatId),
+                                      );
+                                      return;
+                                    }
+                                    _currentOpenChatId = chatId;
+                                    NotificationService.activeChatId = chatId;
+                                    unawaited(
+                                      NotificationService()
+                                          .cancelChatNotifications(chatId),
+                                    );
+                                    await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ChatScreen(
+                                            chat: chat, user: widget.user),
+                                      ),
+                                    );
+                                    NotificationService.activeChatId = null;
+                                    _currentOpenChatId = null;
+                                    _fetchChats();
+                                  },
                                 ),
-                                if (partner is Map &&
-                                    partner['isOnline'] == true)
-                                  const Positioned(
-                                    right: 0,
-                                    bottom: 0,
-                                    child: CircleAvatar(
-                                      radius: 5,
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            title: Row(
-                              children: [
-                                Expanded(child: Text(title)),
-                                if (chat['isMuted'] == true)
-                                  const Padding(
-                                    padding: EdgeInsets.only(left: 4),
-                                    child: Icon(
-                                      Icons.notifications_off,
-                                      size: 16,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            subtitle: Text(
-                              lastMsg.isEmpty ? 'No messages yet' : lastMsg,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Text('Now',
-                                    style: TextStyle(
-                                        fontSize: 12, color: Colors.grey)),
-                                if (unreadCount > 0)
-                                  Badge(label: Text(unreadCount.toString()))
-                                else
-                                  const SizedBox(height: 16),
-                              ],
-                            ),
-                            onTap: () async {
-                              _currentOpenChatId = chatId;
-                              NotificationService.activeChatId = chatId;
-                              unawaited(
-                                NotificationService()
-                                    .cancelChatNotifications(chatId),
-                              );
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      ChatScreen(chat: chat, user: widget.user),
-                                ),
-                              );
-                              NotificationService.activeChatId = null;
-                              _currentOpenChatId = null;
-                              _fetchChats();
-                            },
-                          ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => showSearch(
-          context: context,
-          delegate: UserSearch(api, widget.user),
-        ),
-        child: const Icon(Icons.person_add),
+                      ),
+          ),
+        ],
+      ),
+      floatingActionButton: PopupMenuButton<String>(
+        icon: const Icon(Icons.add),
+        onSelected: (v) async {
+          if (v == 'search') {
+            showSearch(
+                context: context, delegate: UserSearch(api, widget.user));
+          } else if (v == 'group') {
+            final created = await Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CreateGroupScreen()));
+            if (created == true && mounted && context.mounted) {
+              _fetchChats();
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.clearSnackBars();
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Group created')),
+              );
+            }
+          }
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'search', child: Text('Search users')),
+          PopupMenuItem(value: 'group', child: Text('Create group')),
+        ],
       ),
     );
   }

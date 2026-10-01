@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import '../widgets/message_action_dialogs.dart';
+import '../../../core/utils/platform_utils.dart';
 
 class ChatAudioRecorder {
   final AudioRecorder _recorder = AudioRecorder();
@@ -16,6 +17,16 @@ class ChatAudioRecorder {
     BuildContext context, {
     required VoidCallback onUpdate,
   }) async {
+    if (kIsWeb || !isMobilePlatform) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Audio recording is not supported in web browser'),
+          ),
+        );
+      }
+      return false;
+    }
     final shouldContinue =
         await MessageActionDialogs.showMicrophonePermissionDialog(context);
     if (shouldContinue != true || !context.mounted) return false;
@@ -34,7 +45,7 @@ class ChatAudioRecorder {
         return false;
       }
       recordingPath =
-          '${Directory.systemTemp.path}${Platform.pathSeparator}voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _recorder.start(
         const RecordConfig(encoder: AudioEncoder.aacLc),
         path: recordingPath!,
@@ -65,13 +76,7 @@ class ChatAudioRecorder {
     try {
       await _recorder.stop();
     } catch (_) {}
-    final path = recordingPath;
     recordingPath = null;
-    if (path != null) {
-      try {
-        await File(path).delete();
-      } catch (_) {}
-    }
     isRecording = false;
     recordingSeconds = 0;
     onUpdate();

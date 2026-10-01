@@ -15,3 +15,6 @@ export type PublicUser = {
   about: string;
   avatarUrl: string | null;
 };
+
+export type ChatType = 'direct' | 'group';
+export type MemberRole = 'owner' | 'admin' | 'member';

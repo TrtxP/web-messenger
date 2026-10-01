@@ -90,6 +90,10 @@ class ChatService {
     return res;
   }
 
+  Future<List<dynamic>> searchMessages(String chatId, String query) async {
+    return _api.get('/chats/$chatId/messages/search?q=${Uri.encodeComponent(query)}');
+  }
+
   String formatMediaStreamUrl(String mediaId) {
     return _api.formatUrl('/media/stream/$mediaId?token=${Api.token ?? ''}');
   }
