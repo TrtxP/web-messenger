@@ -28,7 +28,7 @@ export class ChatsController {
     private readonly store: StoreService,
     private readonly messengerGateway: MessengerGateway,
     private readonly pushService: PushService,
-  ) {}
+  ) { }
 
   @Get()
   @UseGuards(AuthGuard)
@@ -59,14 +59,14 @@ export class ChatsController {
     const partnerId = memberIds.find((id: string) => id !== req.user.id);
     return {
       isOnline: partnerId
-          ? this.messengerGateway.isUserOnline(partnerId)
-          : false,
+        ? this.messengerGateway.isUserOnline(partnerId)
+        : false,
       activity: partnerId
-          ? this.messengerGateway.getChatActivity(chatId, partnerId)
-          : null,
+        ? this.messengerGateway.getChatActivity(chatId, partnerId)
+        : null,
       lastSeenAt: partnerId
-          ? this.messengerGateway.getUserLastSeenAt(partnerId)
-          : null,
+        ? this.messengerGateway.getUserLastSeenAt(partnerId)
+        : null,
     };
   }
 
@@ -89,13 +89,21 @@ export class ChatsController {
       throw new HttpException('Invalid activity', HttpStatus.BAD_REQUEST);
     }
     const member = await this.store['pool'].query(
-      `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+      `SELECT u.username 
+       FROM chat_members cm 
+       JOIN users u ON u.id = cm.user_id 
+       WHERE cm.chat_id = $1 AND cm.user_id = $2`,
       [chatId, req.user.id],
     );
     if (!member.rowCount) {
       throw new HttpException('Chat not found', HttpStatus.NOT_FOUND);
     }
     this.messengerGateway.setChatActivity(chatId, req.user.id, activity);
+
+    const username = member.rows[0]?.username || req.user.username || 'User';
+
+    await this.messengerGateway.notifyChatActivity(chatId, req.user.id, username, activity);
+
     return { ok: true };
   }
 
@@ -188,10 +196,10 @@ export class ChatsController {
             body.type === 'AUDIO'
               ? '🎤 Voice message'
               : body.type === 'IMAGE'
-              ? '📷 Photo'
-              : body.type === 'VIDEO'
-              ? '🎥 Video'
-              : content;
+                ? '📷 Photo'
+                : body.type === 'VIDEO'
+                  ? '🎥 Video'
+                  : content;
           await this.pushService.sendMessagePush(
             member.user_id,
             chatId,
@@ -202,7 +210,7 @@ export class ChatsController {
           );
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return message;
   }
 

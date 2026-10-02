@@ -73,6 +73,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isGroupInfoOpen = false;
   bool _isDisposed = false;
   Timer? _messageRefreshTimer;
+  Timer? _activityAutoClearTimer;
 
   @override
   void initState() {
@@ -97,12 +98,13 @@ class _ChatScreenState extends State<ChatScreen> {
       chatService: _chatService,
       onPartnerPresenceChanged: (isOnline, activity, lastSeenAt) {
         if (mounted && !_isDisposed) {
+          final formatted = _formatActivity(activity);
           if (isContactOnline != isOnline ||
-              contactActivity != activity ||
+              contactActivity != formatted ||
               contactLastSeenAt != lastSeenAt) {
             setState(() {
               isContactOnline = isOnline;
-              contactActivity = activity;
+              contactActivity = formatted;
               contactLastSeenAt = lastSeenAt;
             });
           }
@@ -113,6 +115,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _socketController = ChatSocketController(
       chatId: chatId,
+      onChatActivityChanged: _onChatActivityReceived,
       onMessageStatusUpdated: (msgId, newStatus, targetChatId) {
         if (!mounted || _isDisposed) return;
         if (targetChatId != null && targetChatId != chatId) return;
@@ -145,6 +148,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _isDisposed = true;
+    _activityAutoClearTimer?.cancel();
     _socketController.dispose();
     _presenceController.dispose();
     _audioRecorder.dispose();
@@ -230,6 +234,64 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
     } catch (_) {}
+  }
+
+  String? _formatActivity(String? activity, {String? displayName}) {
+    if (activity == null || activity.isEmpty) return null;
+    if (isGroupChat) {
+      final name = displayName ?? 'Member';
+      switch (activity) {
+        case 'typing':
+          return '$name is typing...';
+        case 'sending_audio':
+          return '$name is recording audio...';
+        case 'sending_image':
+          return '$name is sending photo...';
+        case 'sending_video':
+          return '$name is sending video...';
+        default:
+          return '$name is active...';
+      }
+    } else {
+      switch (activity) {
+        case 'typing':
+          return 'typing...';
+        case 'sending_audio':
+          return 'recording audio...';
+        case 'sending_image':
+          return 'sending photo...';
+        case 'sending_video':
+          return 'sending video...';
+        default:
+          return 'active...';
+      }
+    }
+  }
+
+  void _onChatActivityReceived(
+      String userId, String username, String? activity) {
+    if (userId == currentUserId) return;
+
+    String displayName = username;
+    if (displayName.isEmpty || displayName == 'User') {
+      if (isGroupChat) {
+        displayName = _senderNames[userId] ?? 'Member';
+      } else {
+        displayName = chatTitle;
+      }
+    }
+
+    final formatted = _formatActivity(activity, displayName: displayName);
+    if (mounted) {
+      setState(() => contactActivity = formatted);
+    }
+
+    _activityAutoClearTimer?.cancel();
+    if (formatted != null) {
+      _activityAutoClearTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (mounted) setState(() => contactActivity = null);
+      });
+    }
   }
 
   bool _hasUnreadIncoming(List<dynamic> list) {
@@ -366,9 +428,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final result = await CreatePollDialog.show(context);
     if (result == null) return;
     try {
-      final poll = await _pollService.createPoll(
-          chatId,
-          result['question'] as String,
+      await _pollService.createPoll(chatId, result['question'] as String,
           List<String>.from(result['options'] as List),
           isAnonymous: result['isAnonymous'] as bool? ?? false);
       _fetchMessages();

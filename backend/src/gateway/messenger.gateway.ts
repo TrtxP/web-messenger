@@ -142,6 +142,20 @@ export class MessengerGateway implements OnGatewayInit, OnGatewayConnection, OnG
     }
   }
 
+  async notifyChatActivity(chatId: string, senderId: string, username: string, activity: string | null) {
+    const members = await this.getChatMembers(chatId).catch(() => [] as string[]);
+    for (const memberId of members) {
+      if (memberId !== senderId) {
+        this.server?.to(`user:${memberId}`).emit('chat:activity', {
+          chatId,
+          userId: senderId,
+          username,
+          activity,
+        });
+      }
+    }
+  }
+
   private async getChatMembers(chatId: string): Promise<string[]> {
     const res = await this.store['pool'].query(
       `SELECT user_id FROM chat_members WHERE chat_id = $1`,

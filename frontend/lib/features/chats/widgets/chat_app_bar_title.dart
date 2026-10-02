@@ -84,7 +84,18 @@ class ChatAppBarTitle extends StatelessWidget {
                     const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
               if (isGroupChat)
-                if (groupSubtitle != null && groupSubtitle!.isNotEmpty)
+                if (contactActivity != null && contactActivity!.isNotEmpty)
+                  Text(
+                    contactActivity!,
+                    key: const Key('typing_indicator_subtitle'),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.green,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else if (groupSubtitle != null && groupSubtitle!.isNotEmpty)
                   Text(
                     groupSubtitle!,
                     key: const Key('group_subtitle'),

@@ -8,6 +8,8 @@ import '../../../core/network/api_client.dart';
 
 class ChatSocketController {
   final String chatId;
+  final void Function(String userId, String username, String? activity)
+      onChatActivityChanged;
   final void Function(String messageId, String status, String? targetChatId)
       onMessageStatusUpdated;
   final void Function(String deletedChatId) onChatDeleted;
@@ -23,6 +25,7 @@ class ChatSocketController {
     required this.onMessageStatusUpdated,
     required this.onChatDeleted,
     required this.onConnectivityChanged,
+    required this.onChatActivityChanged,
   });
 
   Future<void> connect() async {
@@ -59,6 +62,16 @@ class ChatSocketController {
       final deletedChatId = data is Map ? data['chatId']?.toString() : null;
       if (deletedChatId != null) {
         onChatDeleted(deletedChatId);
+      }
+    });
+
+    _socket?.on('chat:activity', (data) {
+      if (_isDisposed) return;
+      if (data is Map && data['chatId']?.toString() == chatId) {
+        final userId = data['userId']?.toString() ?? '';
+        final username = data['username']?.toString() ?? 'User';
+        final activity = data['activity']?.toString();
+        onChatActivityChanged.call(userId, username, activity);
       }
     });
   }
