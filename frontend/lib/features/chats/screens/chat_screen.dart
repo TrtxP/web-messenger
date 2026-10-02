@@ -371,11 +371,6 @@ class _ChatScreenState extends State<ChatScreen> {
           result['question'] as String,
           List<String>.from(result['options'] as List),
           isAnonymous: result['isAnonymous'] as bool? ?? false);
-      final pollId = poll['id']?.toString() ?? '';
-      if (pollId.isNotEmpty) {
-        textController.text = pollId;
-        await _sendMessage(type: 'POLL');
-      }
       _fetchMessages();
     } catch (e) {
       if (mounted) {
