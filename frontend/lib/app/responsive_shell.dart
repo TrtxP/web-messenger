@@ -58,18 +58,20 @@ class _ResponsiveShellState extends State<ResponsiveShell> {
 
         final home = SizedBox(
           width: isExtraWide ? 300 : 360,
-          child: HomeScreen(
-            key: _homeKey,
-            user: widget.user,
-            onLogout: widget.onLogout,
-            onChatSelected: (chat) {
-              _handleChatSelected(chat);
-              if (!isExtraWide) {
-                _handleCloseSecondPanel();
-              }
-            },
-            onOpenSecondPanel: _handleOpenSecondPanel,
-            onChatDeleted: _handleChatClosed,
+          child: ScaffoldMessenger(
+            child: HomeScreen(
+              key: _homeKey,
+              user: widget.user,
+              onLogout: widget.onLogout,
+              onChatSelected: (chat) {
+                _handleChatSelected(chat);
+                if (!isExtraWide) {
+                  _handleCloseSecondPanel();
+                }
+              },
+              onOpenSecondPanel: _handleOpenSecondPanel,
+              onChatDeleted: _handleChatClosed,
+            ),
           ),
         );
 
@@ -79,32 +81,36 @@ class _ResponsiveShellState extends State<ResponsiveShell> {
               home,
               const VerticalDivider(width: 1),
               Expanded(
-                child: ChatScreen(
-                  key: ValueKey(_selectedChat!['id']),
-                  chat: _selectedChat!,
-                  user: widget.user,
-                  onClose: () => _handleChatClosed(_selectedChat!['id'].toString()),
+                child: ScaffoldMessenger(
+                  child: ChatScreen(
+                    key: ValueKey(_selectedChat!['id']),
+                    chat: _selectedChat!,
+                    user: widget.user,
+                    onClose: () => _handleChatClosed(_selectedChat!['id'].toString()),
+                  ),
                 ),
               ),
               const VerticalDivider(width: 1),
               Expanded(
-                child: Stack(
-                  children: [
-                    ChatScreen(
-                      key: ValueKey(_secondaryChat!['id']),
-                      chat: _secondaryChat!,
-                      user: widget.user,
-                      onClose: () => _handleChatClosed(_secondaryChat!['id'].toString()),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: _handleCloseSecondPanel,
+                child: ScaffoldMessenger(
+                  child: Stack(
+                    children: [
+                      ChatScreen(
+                        key: ValueKey(_secondaryChat!['id']),
+                        chat: _secondaryChat!,
+                        user: widget.user,
+                        onClose: () => _handleChatClosed(_secondaryChat!['id'].toString()),
                       ),
-                    ),
-                  ],
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: _handleCloseSecondPanel,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -117,11 +123,13 @@ class _ResponsiveShellState extends State<ResponsiveShell> {
             const VerticalDivider(width: 1),
             Expanded(
               child: _selectedChat != null
-                  ? ChatScreen(
-                      key: ValueKey(_selectedChat!['id']),
-                      chat: _selectedChat!,
-                      user: widget.user,
-                      onClose: () => _handleChatClosed(_selectedChat!['id'].toString()),
+                  ? ScaffoldMessenger(
+                      child: ChatScreen(
+                        key: ValueKey(_selectedChat!['id']),
+                        chat: _selectedChat!,
+                        user: widget.user,
+                        onClose: () => _handleChatClosed(_selectedChat!['id'].toString()),
+                      ),
                     )
                   : const Center(
                       child: Column(

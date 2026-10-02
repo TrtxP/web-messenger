@@ -492,9 +492,14 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => isMuted = newMute);
         if (context.mounted) {
           ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
               content: Text(
-                  newMute ? 'Notifications muted' : 'Notifications unmuted')));
+                  newMute ? 'Notifications muted' : 'Notifications unmuted'),
+            ),
+          );
         }
       }
     } catch (_) {}
